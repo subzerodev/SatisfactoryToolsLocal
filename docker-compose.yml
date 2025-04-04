@@ -12,7 +12,7 @@ services:
       - /app/node_modules
       - /app/vendor
       # Volume for shared content
-      - /mnt/user/appdata/SatisfactoryTools:/mnt/shared-sessions
+      - /mnt/user/appdata/SatisfactoryTools:/mnt/shared
     environment:
       - NODE_ENV=production
     restart: unless-stopped
