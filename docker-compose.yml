@@ -1,0 +1,17 @@
+version: '3.8'
+services:
+  satisfactory-tools:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8888:80"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/vendor
+      # Volume for shared content
+      - /mnt/user/appdata/SatisfactoryTools:/mnt/shared
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
