@@ -17,6 +17,7 @@ import {IRootScope} from '@src/Types/IRootScope';
 
 export class ProductionController
 {
+	public static $inject = ['$scope', '$timeout', 'DataStorageService', '$location', '$rootScope'];
 
 	public selectedTabs: ProductionTab[] = [];
 	public tab: ProductionTab|null = null;
@@ -25,7 +26,10 @@ export class ProductionController
 	public cloningInProgress: boolean;
 	public importOpen: boolean = false;
 	public importFiles: File[] = [];
-
+	public lastSaveTime: Date | null = null;
+	public saveInProgress: boolean = false;
+	public autoSaveEnabled: boolean = true; // Default to enabled
+	public saveDelaySeconds: number = 60; // Default to 60 seconds (1 minute)
 	public readonly rawResources: IResourceSchema[] = data.getResources();
 	public readonly craftableItems: IItemSchema[] = model.getAutomatableItems();
 	public readonly inputableItems: IItemSchema[] = model.getInputableItems();
@@ -33,15 +37,13 @@ export class ProductionController
 	public readonly alternateRecipes: IRecipeSchema[] = data.getAlternateRecipes();
 	public readonly basicRecipes: IRecipeSchema[] = data.getBaseItemRecipes();
 	public readonly machines: IBuildingSchema[] = data.getManufacturers();
-
 	public result: string;
-
 	public options: {} = {
 		'items/min': Constants.PRODUCTION_TYPE.PER_MINUTE,
 		'maximize': Constants.PRODUCTION_TYPE.MAXIMIZE,
 	};
 
-	public static $inject = ['$scope', '$timeout', 'DataStorageService', '$location', '$rootScope'];
+	private saveDebounceTimeout: any = null;
 	private readonly storageKey: string;
 
 	public constructor(
@@ -60,11 +62,21 @@ export class ProductionController
 			this.storageKey = 'tmpProduction';
 		}
 
+		// Load auto-save settings
+		const savedSettings = this.dataStorageService.loadData('autoSaveSettings', null);
+		if (savedSettings) {
+			this.autoSaveEnabled = savedSettings.enabled;
+			this.saveDelaySeconds = savedSettings.delay;
+		}
+
 		scope.$timeout = $timeout;
 		scope.saveState = () => {
 			this.saveState();
+			this.debouncedSaveToServer();
 		};
-		this.loadState();
+
+		// Load state from server first, fallback to local storage if needed
+		this.loadStateWithServerFallback();
 		$timeout(() => {
 			const query = this.$location.search();
 			if ('share' in query) {
@@ -76,6 +88,7 @@ export class ProductionController
 						const tabData: IProductionData = response.data.data;
 						tabData.metadata.name = 'Shared: ' + tabData.metadata.name;
 						const tab = new ProductionTab(this.scope, $rootScope.version, tabData);
+						tab.controller = this; // Add reference to controller for auto-save
 						this.tabs.push(tab);
 						this.tab = tab;
 						this.saveState();
@@ -86,6 +99,42 @@ export class ProductionController
 				});
 			}
 		});
+	}
+
+	/**
+	 * Debounces save operations to avoid excessive server requests
+	 */
+	public debouncedSaveToServer(): void {
+		// Skip if auto-save is disabled
+		if (!this.autoSaveEnabled) {
+			return;
+		}
+
+		// Clear any existing timeout
+		if (this.saveDebounceTimeout) {
+			this.$timeout.cancel(this.saveDebounceTimeout);
+		}
+		
+		// Set a new timeout
+		this.saveDebounceTimeout = this.$timeout(() => {
+			this.performServerSave();
+		}, this.saveDelaySeconds * 1000); // Convert to milliseconds
+	}
+
+	/**
+	 * Updates the auto-save settings and saves them to localStorage
+	 */
+	public updateAutoSaveSettings(): void {
+		// Save settings to localStorage
+		this.dataStorageService.saveData('autoSaveSettings', {
+			enabled: this.autoSaveEnabled,
+			delay: this.saveDelaySeconds
+		});
+
+		// If turning off auto-save, cancel any pending save
+		if (!this.autoSaveEnabled && this.saveDebounceTimeout) {
+			this.$timeout.cancel(this.saveDebounceTimeout);
+		}
 	}
 
 	public toggleImport(): void
@@ -119,11 +168,16 @@ export class ProductionController
 					}
 
 					tab.request.resourceWeight = Data.resourceWeights;
-					this.tabs.push(new ProductionTab(this.scope, this.$rootScope.version, tab));
+					const productionTab = new ProductionTab(this.scope, this.$rootScope.version, tab);
+					productionTab.controller = this; // Add reference to controller for auto-save
+					this.tabs.push(productionTab);
 				}
 
 				Strings.addNotification('Import complete', 'Successfuly imported ' + tabs.length + ' tab' + (tabs.length === 1 ? '' : 's') + '.');
-				this.scope.$apply();
+				// Use $timeout to safely update UI instead of $apply
+				this.$timeout(() => {
+					// UI will be updated safely in the next digest cycle
+				});
 				input.value = '';
 			} catch (e) {
 				Strings.addNotification('ERROR', 'Couldn\'t import file: ' + e.message, 5000);
@@ -181,11 +235,13 @@ export class ProductionController
 		this.addingInProgress = true;
 		this.$timeout(0).then(() => {
 			const tab = new ProductionTab(this.scope, this.$rootScope.version);
+			tab.controller = this; // Add reference to controller for auto-save
 			this.tabs.push(tab);
 			this.tab = tab;
 			this.addingInProgress = false;
 		});
 		this.saveState();
+		this.debouncedSaveToServer();
 	}
 
 	public cloneTab(tab: ProductionTab): void
@@ -195,11 +251,13 @@ export class ProductionController
 			const clone = new ProductionTab(this.scope, this.$rootScope.version);
 			clone.data.request = angular.copy(tab.data.request);
 			clone.data.metadata.name = 'Clone: ' + clone.data.metadata.name;
+			clone.controller = this; // Add reference to controller for auto-save
 			this.tabs.push(clone);
 			this.tab = clone;
 			this.cloningInProgress = false;
 		});
 		this.saveState();
+		this.debouncedSaveToServer();
 	}
 
 	public removeTab(tab: ProductionTab): void
@@ -221,6 +279,7 @@ export class ProductionController
 			}
 		}
 		this.saveState();
+		this.debouncedSaveToServer();
 	}
 
 	public clearAllTabs(): void
@@ -230,6 +289,7 @@ export class ProductionController
 		});
 		this.tabs = [];
 		this.addEmptyTab();
+		this.debouncedSaveToServer();
 	}
 
 	public getItem(className: string): IItemSchema
@@ -247,13 +307,197 @@ export class ProductionController
 		return data.getRawData().recipes[className];
 	}
 
-	private saveState(): void
+	public saveToServer(): void 
 	{
 		const save: IProductionData[] = [];
 		for (const tab of this.tabs) {
 			save.push(tab.data);
 		}
-		this.dataStorageService.saveData(this.storageKey, save);
+		
+		try {
+			const savePromise = this.dataStorageService.saveToServer(this.storageKey, save);
+			
+			Strings.addNotification('Info', 'Saving to server...', 1500);
+			
+			savePromise.then(() => {
+				// Only show success if we get here (the promise resolved successfully)
+				Strings.addNotification('Success', 'Production data saved to server.', 3000);
+				this.lastSaveTime = new Date();
+				
+				// Also save to localStorage to keep them in sync
+				this.saveState();
+			})
+			.catch((error) => {
+				console.error('Server save failed:', error);
+				Strings.addNotification('Error', 'Failed to save data to server. Check console for details.', 5000);
+			});
+		} catch (error) {
+			console.error('Error initiating save operation:', error);
+			Strings.addNotification('Error', 'Failed to initiate server save operation.', 5000);
+		}
+	}
+
+	public loadFromServer(): void 
+	{
+		try {
+			Strings.addNotification('Info', 'Loading from server...', 1500);
+			
+			this.dataStorageService.loadFromServer(this.storageKey, null)
+				.then((loaded) => {
+					if (loaded === null) {
+						Strings.addNotification('Info', 'No production data found on server.', 3000);
+						return;
+					}
+					
+					// Use $timeout to safely queue UI updates outside of current digest cycle
+					this.$timeout(() => {
+						// Clear existing tabs
+						this.tabs.forEach((tab: ProductionTab) => {
+							tab.unregister();
+						});
+						this.tabs = [];
+						
+						// Load new tabs from server
+						for (const item of loaded) {
+							const tab = new ProductionTab(this.scope, this.$rootScope.version, item);
+							tab.controller = this; // Add reference to controller for auto-save
+							this.tabs.push(tab);
+						}
+						
+						if (this.tabs.length) {
+							this.tab = this.tabs[0];
+							Strings.addNotification('Success', `Loaded ${this.tabs.length} production ${this.tabs.length === 1 ? 'tab' : 'tabs'} from server.`, 3000);
+						} else {
+							this.addEmptyTab();
+							Strings.addNotification('Warning', 'Server data was loaded but contained no production tabs.', 3000);
+						}
+						
+						// Save to localStorage to keep them in sync
+						this.saveState();
+					});
+				})
+				.catch((error) => {
+					console.error('Server load failed:', error);
+					Strings.addNotification('Error', 'Failed to load data from server. Check console for details.', 5000);
+				});
+		} catch (error) {
+			console.error('Error initiating load operation:', error);
+			Strings.addNotification('Error', 'Failed to initiate server load operation.', 5000);
+		}
+	}
+
+	/**
+	 * Performs the actual save operation to the server
+	 */
+	private performServerSave(): void {
+		// Skip if a save is already in progress
+		if (this.saveInProgress) {
+			return;
+		}
+
+		this.saveInProgress = true;
+
+		const save: IProductionData[] = [];
+		for (const tab of this.tabs) {
+			save.push(tab.data);
+		}
+
+		// Subtle notification
+		Strings.addNotification('Info', 'Saving to server...', 1000);
+
+		this.dataStorageService.saveToServer(this.storageKey, save)
+			.then(() => {
+				this.lastSaveTime = new Date();
+				// Keep local storage in sync
+				this.saveState();
+				// Subtle success indication
+				Strings.addNotification('Success', 'Saved to server', 1000);
+			})
+			.catch((error) => {
+				console.error('Server save failed:', error);
+				Strings.addNotification('Error', 'Failed to save to server', 3000);
+			})
+			.finally(() => {
+				this.saveInProgress = false;
+			});
+	}
+
+	/**
+	 * Loads state with server data as primary source, local storage as fallback
+	 */
+	private loadStateWithServerFallback(): void {
+		Strings.addNotification('Info', 'Loading from server...', 1000);
+
+		this.dataStorageService.loadFromServer(this.storageKey, null)
+			.then((loaded) => {
+				if (loaded === null) {
+					// No server data, fall back to local
+					Strings.addNotification('Info', 'No data found on server, using local data', 2000);
+					this.loadLocalState();
+				} else {
+					this.$timeout(() => {
+					// Clear existing tabs
+					this.tabs.forEach((tab: ProductionTab) => {
+						tab.unregister();
+					});
+					this.tabs = [];
+
+					// Load new tabs from server
+					for (const item of loaded) {
+						const tab = new ProductionTab(this.scope, this.$rootScope.version, item);
+						tab.controller = this; // Add reference to controller for auto-save
+						this.tabs.push(tab);
+					}
+
+					if (this.tabs.length) {
+						this.tab = this.tabs[0];
+						Strings.addNotification('Success', `Loaded ${this.tabs.length} production ${this.tabs.length === 1 ? 'tab' : 'tabs'} from server`, 2000);
+					} else {
+						this.addEmptyTab();
+						Strings.addNotification('Warning', 'Server data was loaded but contained no production tabs', 3000);
+					}
+
+					// Save to localStorage to keep them in sync
+					this.saveState();
+					});
+				}
+			})
+			.catch((error) => {
+				console.error('Server load failed:', error);
+				// Fall back to local storage
+				Strings.addNotification('Info', 'Using local data (server unavailable)', 3000);
+				this.loadLocalState();
+			});
+	}
+
+	private loadLocalState(): void {
+		const loaded = this.dataStorageService.loadData(this.storageKey, null);
+		if (loaded === null) {
+			this.addEmptyTab();
+		} else {
+			for (const item of loaded) {
+				const tab = new ProductionTab(this.scope, this.$rootScope.version, item);
+				tab.controller = this; // Add reference to controller for auto-save
+				this.tabs.push(tab);
+			}
+			if (this.tabs.length) {
+				this.tab = this.tabs[0];
+			} else {
+				this.addEmptyTab();
+			}
+		}
+		
+		// Check if there's any meaningful content in the tabs to enable the load from server button
+		this.$timeout(() => {
+		const hasData = this.tabs.some(tab => 
+			tab.data.request.production.length > 0 || 
+			tab.data.request.input.length > 0);
+
+			if (!hasData) {
+				// If no meaningful data in local storage, try loading from server
+				this.loadFromServer();
+			}
+		});
 	}
 
 	private loadState(): void
@@ -273,12 +517,18 @@ export class ProductionController
 		}
 	}
 
+	private saveState(): void
+	{
+		const save: IProductionData[] = [];
+		for (const tab of this.tabs) {
+			save.push(tab.data);
+		}
+		this.dataStorageService.saveData(this.storageKey, save);
+	}
 }
 
 export interface IProductionControllerScope extends IScope
 {
-
 	$timeout: ITimeoutService;
 	saveState: () => void;
-
 }

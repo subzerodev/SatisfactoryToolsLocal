@@ -148,6 +148,61 @@
 					<span ng-if="!ctrl.tab.state.expanded" class="fas fa-fw fa-chevron-down"></span>
 				</a>
 			</span>
+			
+			<span class="btn-group ml-2">
+				<a class="btn btn-primary" ng-click="ctrl.saveToServer()" tooltip title="Save to server (manually triggers an immediate save)">
+					<span class="fas fa-cloud-upload-alt"></span>
+				</a>
+				<a class="btn btn-primary" ng-click="ctrl.loadFromServer()" tooltip title="Load from server">
+					<span class="fas fa-cloud-download-alt"></span>
+				</a>
+			</span>
+			
+			<!-- Save status indicator -->
+			<span class="save-status text-muted small ml-3 d-flex align-items-center">
+				<span class="mr-1">
+					<span class="fas fa-circle" ng-class="{
+						'text-success': !ctrl.saveInProgress && ctrl.autoSaveEnabled, 
+						'text-warning': ctrl.saveInProgress,
+						'text-secondary': !ctrl.autoSaveEnabled
+					}"></span>
+				</span>
+				
+				<!-- Auto-save settings dropdown -->
+				<div class="dropdown mr-2">
+					<span class="fas fa-cog cursor-pointer" data-toggle="dropdown" tooltip title="Auto-save settings"></span>
+					<div class="dropdown-menu p-3" style="min-width: 250px;">
+						<h6>Auto-Save Settings</h6>
+						<div class="form-group">
+							<div class="custom-control custom-switch mb-2">
+								<input type="checkbox" class="custom-control-input" id="autoSaveEnabled" 
+								       ng-model="ctrl.autoSaveEnabled" 
+								       ng-change="ctrl.updateAutoSaveSettings()">
+								<label class="custom-control-label" for="autoSaveEnabled">Enable Auto-Save</label>
+							</div>
+						</div>
+						
+						<div class="form-group" ng-if="ctrl.autoSaveEnabled">
+							<label>Auto-save Delay</label>
+							<select class="form-control" 
+							        ng-model="ctrl.saveDelaySeconds" 
+							        ng-change="ctrl.updateAutoSaveSettings()" 
+							        ng-disabled="!ctrl.autoSaveEnabled">
+								<option value="5">5 seconds</option>
+								<option value="10">10 seconds</option>
+								<option value="30">30 seconds</option>
+								<option value="60" selected>1 minute</option>
+							</select>
+							<small class="text-muted mt-2 d-block">Changes will be saved after this period of inactivity</small>
+						</div>
+					</div>
+				</div>
+				
+				<!-- Status message with fixed width to prevent layout shifts -->
+				<span class="status-text" style="min-width: 140px; display: inline-block;" ng-if="!ctrl.saveInProgress && ctrl.lastSaveTime && ctrl.autoSaveEnabled">Auto-saved {{ctrl.lastSaveTime | date:'shortTime'}}</span>
+				<span class="status-text" style="min-width: 140px; display: inline-block;" ng-if="!ctrl.autoSaveEnabled">Auto-save disabled</span>
+				<span class="status-text" style="min-width: 140px; display: inline-block;" ng-if="ctrl.saveInProgress">Saving to server...</span>
+			</span>
 		</div>
 		<div class="card-body" ng-show="ctrl.tab.state.expanded">
 			<div class="row">

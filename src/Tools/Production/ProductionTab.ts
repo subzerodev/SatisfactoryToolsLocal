@@ -14,9 +14,11 @@ import {ProductionResultFactory} from '@src/Tools/Production/Result/ProductionRe
 import {DataProvider} from '@src/Data/DataProvider';
 import {IRecipeSchema} from '@src/Schema/IRecipeSchema';
 
+import {ProductionController} from '@src/Module/Controllers/ProductionController';
+
 export class ProductionTab
 {
-
+	public controller: ProductionController;
 	public state = {
 		expanded: true,
 		renaming: false,
@@ -45,6 +47,7 @@ export class ProductionTab
 
 	private readonly unregisterCallback: () => void;
 	private firstRun: boolean = true;
+	private initialized: boolean = false;
 
 	public constructor(private readonly scope: IProductionControllerScope, private readonly version: string, productionData?: IProductionData)
 	{
@@ -63,9 +66,19 @@ export class ProductionTab
 			return this.data.request;
 		}, Callbacks.debounce((newValue, oldValue) => {
 			this.firstRun = false;
+			
+			// Save to local storage
 			this.scope.saveState();
+			
+			// If this is an actual change (not initial setup) and we have a controller reference,
+			// trigger auto-save to server via the debounced save function
+			if (this.initialized && this.controller) {
+				this.controller.debouncedSaveToServer();
+			}
+			
 			this.shareLink = '';
 			this.calculate(this.scope.$timeout);
+			this.initialized = true;
 		}, 400), true);
 	}
 
@@ -507,5 +520,4 @@ export class ProductionTab
 		});
 		return result;
 	}
-
 }
