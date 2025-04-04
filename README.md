@@ -12,6 +12,20 @@ Satisfactory Tools for planning and building the perfect base.
 - `yarn build`
 - Set up a virtual host pointing to `/www` directory (using e.g. Apache or ngnix)
 
+## Docker - Note the uses a basic php server so only for use on a local network
+- Forked in order to dockerise and make changes in order to run on a home server and have the production lines save serverside instead of in browser local storage.
+- Runs using a simple php server with a basic router.php file to handle the spa routing.
+
+From the project directory run
+- `docker-compose build`
+- `docker-compose run`
+
+App will be accessible from port 8888 as denoted in the docker-compose file. The server will save the production line files to: 
+/mnt/user/appdata/SatisfactoryTools - This is because i run it on an unraid server
+
+##Autosave
+- Autosave was added with a few interval options as well as enable, disable and manual save or load from server file
+
 ## Contributing
 Any pull requests are welcome, though some rules must be followed:
 - try to follow current coding style (there's `tslint` and `.editorconfig`, those should help you with that)
