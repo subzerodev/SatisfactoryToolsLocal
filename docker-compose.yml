@@ -7,11 +7,12 @@ services:
     ports:
       - "8888:80"
     volumes:
-      - .:/app
+      # Commenting out the mount that overrides built files
+      # - .:/app
       - /app/node_modules
       - /app/vendor
       # Volume for shared content
-      - /mnt/user/appdata/SatisfactoryTools:/mnt/shared
+      - /mnt/user/appdata/SatisfactoryTools:/mnt/shared-sessions
     environment:
       - NODE_ENV=production
     restart: unless-stopped
